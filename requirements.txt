@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 streamlit==1.37.0
 pandas
 numpy
@@ -5,3 +6,13 @@ reportlab
 gspread
 oauth2client
 google-auth
+=======
+streamlit==1.49.1
+pandas
+gspread
+google-auth
+reportlabstreamlit==1.48.1
+gspread==6.2.1
+google-auth==2.40.3
+pandas==2.3.1
+>>>>>>> d8baba4 (Initial commit: BP Simulator app)
