@@ -513,13 +513,13 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
     
 
 # --- Determine recruiter mode from URL or prior login ---
-recruiter_mode = _is_recruiter()
-
-# If the page is opened WITHOUT recruiter params, clear any old recruiter flag once
-_no_recruiter_params = not any(k in st.query_params for k in ("mode", "r", "pin"))
+# First: if the URL has no recruiter params, clear any stale recruiter flag
+_no_recruiter_params = all(k not in st.query_params for k in ("mode", "r", "pin"))
 if _no_recruiter_params and st.session_state.get("_recruiter_ok"):
     st.session_state.pop("_recruiter_ok", None)
-    recruiter_mode = False
+
+# Now compute the mode (after clearing)
+recruiter_mode = _is_recruiter()
 
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
