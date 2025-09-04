@@ -215,14 +215,15 @@ def _is_recruiter() -> bool:
     return False
 
 def _recruiter_login_ui():
-    with st.expander("🔒 Recruiter login", expanded=False):
-        pin_try = st.text_input("Enter PIN", type="password")
-        if st.button("Enable recruiter mode"):
-            if pin_try == RECRUITER_PIN:
-                st.session_state["_recruiter_ok"] = True
-                st.success("Recruiter mode enabled for this session.")
-            else:
-                st.error("Wrong PIN.")
+    """Simple recruiter login UI (no nested expander)."""
+    st.markdown("#### 🔒 Recruiter login")
+    pin_try = st.text_input("Enter PIN", type="password", key="recruiter_pin_input")
+    if st.button("Enable recruiter mode", key="recruiter_enable_btn"):
+        if pin_try == RECRUITER_PIN:
+            st.session_state["_recruiter_ok"] = True
+            st.success("Recruiter mode enabled for this session.")
+        else:
+            st.error("Wrong PIN.")
 
 # ================== PDF GENERATION ==================
 def _fmt_money(v):
@@ -446,7 +447,7 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
         "GAC_JSON: "
         f"{'set' if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON') else 'unset'}"
     )
-    _recruiter_login_ui()
+   
 
 recruiter_mode = _is_recruiter()
 if recruiter_mode:
