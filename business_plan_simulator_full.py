@@ -466,7 +466,10 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
+# Show a small recruiter login box on the page
+with st.expander("🔒 Recruiter login", expanded=False):
+    _recruiter_login_ui()
+    
 # Diagnostics tucked away
 with st.expander("⚙️ Diagnostics (staff)", expanded=False):
     st.caption(f"Running file: {os.path.abspath(__file__)}")
