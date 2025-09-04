@@ -388,9 +388,6 @@ def build_pdf(candidate, prospects_df, revenue_df) -> BytesIO:
 # ================== APP ==================
 st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
 
-# ================== APP ==================
-st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
-
 # === Build/version tag ===
 build_time = datetime.now().strftime("%Y-%m-%d %Hh%M")
 st.caption(f"🔄 Build: {build_time}")
@@ -495,14 +492,15 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
     )
     
 
+# --- Determine recruiter mode from URL or prior login ---
 recruiter_mode = _is_recruiter()
 
-# If you load the app without recruiter params, clear any previous recruiter flag
-if ("mode" not in st.query_params) and ("r" not in st.query_params) and ("pin" not in st.query_params):
-    if st.session_state.get("_recruiter_ok"):
-        st.session_state.pop("_recruiter_ok", None)
-        recruiter_mode = False
-        
+# If the page is opened WITHOUT recruiter params, clear any old recruiter flag once
+_no_recruiter_params = not any(k in st.query_params for k in ("mode", "r", "pin"))
+if _no_recruiter_params and st.session_state.get("_recruiter_ok"):
+    st.session_state.pop("_recruiter_ok", None)
+    recruiter_mode = False
+
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
 else:
@@ -797,7 +795,7 @@ frames = [df for df in (df_pros, total_row) if not df.empty]
 df_display = pd.concat(frames, ignore_index=True) if frames else total_row.copy()
 
 highlighter = _make_highlighter(len(df_display))
-st.dataframe(df_display.style.apply(highlighter, axis=1), width="stretch")
+st.dataframe(df_display.style.apply(highlighter, axis=1), use_container_width=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 best_sum = float(df_pros["Best NNM (M)"].sum()) if not df_pros.empty else 0.0
@@ -862,45 +860,133 @@ with st.sidebar:
     st.divider()
     st.caption("Powered by Executive Partners · Secure submission")
 
-# ---------- SECTION 5 (Recruiter-only UI; logic always computes) ----------
-# NOTE: do NOT render anything if recruiter_mode is False.
+  # ------ AI analysis (compute always; render only if recruiter_mode) ------
+total_nnm_3y = float((nnm_y1 or 0.0) + (nnm_y2 or 0.0) + (nnm_y3 or 0.0))
+avg_roa = float(((roa_y1 or 0.0) + (roa_y2 or 0.0) + (roa_y3 or 0.0)) / 3.0)
+
+# Thresholds
+if current_market == "CH Onshore":
+    aum_min = 200.0
+else:
+    # default to HNWI thresholds unless recruiter overrides in the gated UI
+    aum_min = 200.0
+
+score = 0
+reasons_pos, reasons_neg, flags = [], [], []
+
+# Experience
+if years_experience >= 7:
+    score += 2; reasons_pos.append("Experience ≥7 years in market")
+elif years_experience >= 6:
+    score += 1; reasons_pos.append("Experience 6 years")
+else:
+    reasons_neg.append("Experience <6 years")
+
+# AUM
+if current_assets >= aum_min:
+    if current_market == "CH Onshore" and current_assets >= 250:
+        score += 2; reasons_pos.append("AUM meets CH 250M target")
+    else:
+        score += 2; reasons_pos.append(f"AUM ≥ {aum_min}M")
+else:
+    reasons_neg.append(f"AUM shortfall: {max(0.0, aum_min - current_assets):.0f}M")
+
+# Comp profile
+if base_salary > 200_000 and last_bonus > 100_000:
+    score += 2; reasons_pos.append("Comp indicates hunter profile")
+elif base_salary <= 150_000 and last_bonus <= 50_000:
+    score -= 1; reasons_neg.append("Low comp indicates inherited/low portability")
+else:
+    flags.append("Comp neutral – clarify origin of book")
+
+# ROA
+if avg_roa >= 1.0:
+    score += 2; reasons_pos.append(f"Avg ROA {avg_roa:.2f}% (excellent)")
+elif avg_roa >= 0.8:
+    score += 1; reasons_pos.append(f"Avg ROA {avg_roa:.2f}% (acceptable)")
+else:
+    reasons_neg.append(f"Avg ROA {avg_roa:.2f}% is low")
+
+# Clients
+if current_number_clients == 0:
+    flags.append("Clients not provided")
+elif current_number_clients > 80:
+    reasons_neg.append(f"High client count ({current_number_clients}) – likely lower segment")
+else:
+    score += 1; reasons_pos.append("Client load appropriate (≤80)")
+
+# Prospects consistency vs NNM Y1
+df_pros_check = pd.DataFrame(
+    st.session_state.prospects_list,
+    columns=["Name","Source","Wealth (M)","Best NNM (M)","Worst NNM (M)"]
+)
+nnm_y1_val = float(nnm_y1 or 0.0)
+best_sum = float(df_pros_check["Best NNM (M)"].sum()) if not df_pros_check.empty else 0.0
+tolerance_pct = 10  # default; recruiter can adjust inside gated UI
+tol = tolerance_pct / 100.0
+
+if nnm_y1_val == 0.0 and best_sum == 0.0:
+    flags.append("Prospects & NNM Y1 both zero")
+elif abs(best_sum - nnm_y1_val) <= tol * max(nnm_y1_val, 1e-9):
+    score += 1; reasons_pos.append(
+        f"Prospects Best NNM {best_sum:.1f}M ≈ NNM Y1 {nnm_y1_val:.1f}M"
+    )
+else:
+    reasons_neg.append(
+        f"Prospects {best_sum:.1f}M vs NNM Y1 {nnm_y1_val:.1f}M (> {int(tolerance_pct)}% dev)"
+    )
+
+# Verdict
+if score >= 7:
+    verdict = "🟢 Strong Candidate"
+elif score >= 4:
+    verdict = "🟡 Medium Potential"
+else:
+    verdict = "🔴 Weak Candidate"
+
+# Keep quick access in session for the sidebar
+st.session_state["_score"] = score
+st.session_state["_verdict"] = verdict  
+
+# ---------- SECTION 5 (Recruiter-only UI; render only when recruiter_mode) ----------
 if recruiter_mode:
     st.markdown('<div class="ep-card">', unsafe_allow_html=True)
     st.markdown('<span class="ep-chip">5️⃣ AI Candidate Analysis (Recruiter)</span>', unsafe_allow_html=True)
+
+    # In recruiter mode, allow adjusting segment & tolerance
+    seg_col1, seg_col2 = st.columns(2)
+    with seg_col1:
+        target_segment = st.selectbox("Target Segment (for thresholds)", ["HNWI", "UHNWI"], index=0)
+    with seg_col2:
+        tolerance_pct = st.slider("NNM vs Prospects tolerance (%)", 0, 50, 10, 1)
+
+    # Recompute aum_min and tolerance impact for transparency (optional to re-score live)
+    aum_min = 200.0 if target_segment == "HNWI" else 300.0
 
     st.subheader(f"Traffic Light: {verdict} (score {score}/10)")
     colA, colB, colC = st.columns(3)
     with colA:
         st.markdown("**Positives**")
-        if reasons_pos:
-            for r in reasons_pos:
-                st.markdown(f"- ✅ {r}")
-        else:
-            st.markdown("- —")
+        for r in (reasons_pos or ["—"]):
+            st.markdown(f"- ✅ {r}" if r != "—" else "- —")
     with colB:
         st.markdown("**Risks / Gaps**")
-        if reasons_neg:
-            for r in reasons_neg:
-                st.markdown(f"- ❌ {r}")
-        else:
-            st.markdown("- —")
+        for r in (reasons_neg or ["—"]):
+            st.markdown(f"- ❌ {r}" if r != "—" else "- —")
     with colC:
         st.markdown("**Flags / To Clarify**")
-        if flags:
-            for r in flags:
-                st.markdown(f"- ⚠️ {r}")
-        else:
-            st.markdown("- —")
+        for r in (flags or ["—"]):
+            st.markdown(f"- ⚠️ {r}" if r != "—" else "- —")
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.metric("AUM (M)", f"{current_assets:,.0f}")
+        st.metric("AUM (M)", f"{float(current_assets or 0):,.0f}")
     with m2:
         st.metric("Avg ROA %", f"{avg_roa:.2f}")
     with m3:
         st.metric("3Y NNM (M)", f"{total_nnm_3y:.1f}")
     with m4:
-        st.metric("Clients", f"{int(current_number_clients)}")
+        st.metric("Clients", f"{int(current_number_clients or 0)}")
 
     st.markdown('</div>', unsafe_allow_html=True)
 # else: render nothing for Section 5
