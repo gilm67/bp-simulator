@@ -388,6 +388,13 @@ def build_pdf(candidate, prospects_df, revenue_df) -> BytesIO:
 # ================== APP ==================
 st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
 
+# ================== APP ==================
+st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
+
+# === Build/version tag ===
+build_time = datetime.now().strftime("%Y-%m-%d %Hh%M")
+st.caption(f"🔄 Build: {build_time}")
+
 # === Brand & CSS ===
 BRAND = {
     "company": "Executive Partners",
