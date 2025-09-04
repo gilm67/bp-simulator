@@ -469,7 +469,7 @@ st.markdown(
 # Show a small recruiter login box on the page
 with st.expander("🔒 Recruiter login", expanded=False):
     _recruiter_login_ui()
-    
+
 # Diagnostics tucked away
 with st.expander("⚙️ Diagnostics (staff)", expanded=False):
     st.caption(f"Running file: {os.path.abspath(__file__)}")
@@ -486,11 +486,13 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
         + ("GOOGLE_SERVICE_ACCOUNT_JSON ✓ " if has_json else "GOOGLE_SERVICE_ACCOUNT_JSON ✗ ")
         + (f"| client_email: `{email_guess}`" if email_guess else "| client_email: (unknown)")
     )
-    _recruiter_login_ui()
+    
 
 recruiter_mode = _is_recruiter()
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
+else:
+    st.caption("Recruiter mode is OFF. Section 5 hidden until PIN entered.")
 
 # Connect to Google Sheet
 worksheet, sheet_status = connect_sheet()
@@ -1071,10 +1073,10 @@ with left:
         file_name=f"BP_{candidate_name or 'candidate'}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
         mime="application/pdf",
         data=pdf_buf.getvalue(),
-        width="stretch"
+        use_container_width=True
     )
 with right:
-    manual_clicked = st.button("💾 Save to Google Sheet (manual)", width="stretch")
+    manual_clicked = st.button("💾 Save to Google Sheet (manual)", use_container_width=True)
 
 # Validation + actions
 ok_to_save, missing_msg = _inputs_ok_for_save()
