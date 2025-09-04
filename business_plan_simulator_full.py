@@ -243,6 +243,13 @@ def _is_recruiter() -> bool:
         return True
     return False
 
+# ================== Recruiter visibility control ==================
+RECRUITER_PIN = os.getenv("BP_RECRUITER_PIN", "2468")
+
+def _is_recruiter() -> bool:
+    ...
+    return False
+
 def _recruiter_login_ui():
     """Simple recruiter login UI (no nested expander)."""
     st.markdown("#### 🔒 Recruiter login")
@@ -253,6 +260,19 @@ def _recruiter_login_ui():
             st.success("Recruiter mode enabled for this session.")
         else:
             st.error("Wrong PIN.")
+
+def _exit_recruiter_mode():
+    # Clear session flag
+    st.session_state.pop("_recruiter_ok", None)
+    # Clear any recruiter params from URL (new API first, fall back to legacy)
+    try:
+        st.query_params.clear()
+    except Exception:
+        try:
+            st.experimental_set_query_params()  # legacy way to clear
+        except Exception:
+            pass
+    st.rerun()
 
 # ================== PDF GENERATION ==================
 def _fmt_money(v):
@@ -503,6 +523,7 @@ if _no_recruiter_params and st.session_state.get("_recruiter_ok"):
 
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
+    st.button("🚪 Exit recruiter mode", on_click=_exit_recruiter_mode)
 else:
     st.caption("Recruiter mode is OFF. Section 5 hidden until PIN entered.")
 
