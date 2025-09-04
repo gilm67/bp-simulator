@@ -496,6 +496,13 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
     
 
 recruiter_mode = _is_recruiter()
+
+# If you load the app without recruiter params, clear any previous recruiter flag
+if ("mode" not in st.query_params) and ("r" not in st.query_params) and ("pin" not in st.query_params):
+    if st.session_state.get("_recruiter_ok"):
+        st.session_state.pop("_recruiter_ok", None)
+        recruiter_mode = False
+        
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
 else:
@@ -856,14 +863,11 @@ with st.sidebar:
     st.caption("Powered by Executive Partners · Secure submission")
 
 # ---------- SECTION 5 (Recruiter-only UI; logic always computes) ----------
-st.markdown('<div class="ep-card">', unsafe_allow_html=True)
-st.markdown('<span class="ep-chip">5️⃣ AI Candidate Analysis (Recruiter)</span>', unsafe_allow_html=True)
-
-# (keep all computations exactly as you have them BEFORE this point:
-# total_nnm_3y, avg_roa, aum_min, score, reasons_pos, reasons_neg, flags, verdict,
-# st.session_state["_score"], st.session_state["_verdict"], etc.)
-
+# NOTE: do NOT render anything if recruiter_mode is False.
 if recruiter_mode:
+    st.markdown('<div class="ep-card">', unsafe_allow_html=True)
+    st.markdown('<span class="ep-chip">5️⃣ AI Candidate Analysis (Recruiter)</span>', unsafe_allow_html=True)
+
     st.subheader(f"Traffic Light: {verdict} (score {score}/10)")
     colA, colB, colC = st.columns(3)
     with colA:
@@ -897,13 +901,9 @@ if recruiter_mode:
         st.metric("3Y NNM (M)", f"{total_nnm_3y:.1f}")
     with m4:
         st.metric("Clients", f"{int(current_number_clients)}")
-else:
-    # Hide Section 5 content completely; show only a small login prompt.
-    st.info("Recruiter analysis is hidden. Use the PIN to view.")
-    with st.expander("🔒 Recruiter login", expanded=False):
-        _recruiter_login_ui()
 
-st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+# else: render nothing for Section 5
 
 # ---------- SECTION 6 ----------
 st.markdown('<div class="ep-card">', unsafe_allow_html=True)
