@@ -855,94 +855,13 @@ with st.sidebar:
     st.divider()
     st.caption("Powered by Executive Partners · Secure submission")
 
-# ---------- SECTION 5 (Recruiter-only UI, always compute) ----------
+# ---------- SECTION 5 (Recruiter-only UI; logic always computes) ----------
 st.markdown('<div class="ep-card">', unsafe_allow_html=True)
 st.markdown('<span class="ep-chip">5️⃣ AI Candidate Analysis (Recruiter)</span>', unsafe_allow_html=True)
 
-if recruiter_mode:
-    seg_col1, seg_col2 = st.columns(2)
-    with seg_col1:
-        target_segment = st.selectbox("Target Segment (for thresholds)", ["HNWI", "UHNWI"], index=0)
-    with seg_col2:
-        tolerance_pct = st.slider("NNM vs Prospects tolerance (%)", 0, 50, 10, 1)
-else:
-    target_segment = "HNWI"
-    tolerance_pct = 10
-
-total_nnm_3y = float(nnm_y1 + nnm_y2 + nnm_y3)
-avg_roa = float((roa_y1 + roa_y2 + roa_y3) / 3)
-
-if current_market == "CH Onshore":
-    aum_min = 200.0
-else:
-    aum_min = 200.0 if target_segment == "HNWI" else 300.0
-
-score = 0
-reasons_pos, reasons_neg, flags = [], [], []
-
-if years_experience >= 7:
-    score += 2; reasons_pos.append("Experience ≥7 years in market")
-elif years_experience >= 6:
-    score += 1; reasons_pos.append("Experience 6 years")
-else:
-    reasons_neg.append("Experience <6 years")
-
-if current_assets >= aum_min:
-    if current_market == "CH Onshore" and current_assets >= 250:
-        score += 2; reasons_pos.append("AUM meets CH 250M target")
-    else:
-        score += 2; reasons_pos.append(f"AUM ≥ {aum_min}M")
-else:
-    reasons_neg.append(f"AUM shortfall: {aum_min - current_assets:.0f}M")
-
-if base_salary > 200_000 and last_bonus > 100_000:
-    score += 2; reasons_pos.append("Comp indicates hunter profile")
-elif base_salary <= 150_000 and last_bonus <= 50_000:
-    score -= 1; reasons_neg.append("Low comp indicates inherited/low portability")
-else:
-    flags.append("Comp neutral – clarify origin of book")
-
-if avg_roa >= 1.0:
-    score += 2; reasons_pos.append(f"Avg ROA {avg_roa:.2f}% (excellent)")
-elif avg_roa >= 0.8:
-    score += 1; reasons_pos.append(f"Avg ROA {avg_roa:.2f}% (acceptable)")
-else:
-    reasons_neg.append(f"Avg ROA {avg_roa:.2f}% is low")
-
-if current_number_clients == 0:
-    flags.append("Clients not provided")
-elif current_number_clients > 80:
-    reasons_neg.append(f"High client count ({current_number_clients}) – likely lower segment")
-else:
-    score += 1; reasons_pos.append("Client load appropriate (≤80)")
-
-df_pros_check = pd.DataFrame(
-    st.session_state.prospects_list,
-    columns=["Name","Source","Wealth (M)","Best NNM (M)","Worst NNM (M)"]
-)
-nnm_y1_val = float(nnm_y1) if nnm_y1 is not None else 0.0
-best_sum = float(df_pros_check["Best NNM (M)"].sum()) if not df_pros_check.empty else 0.0
-tol = max(0.0, tolerance_pct) / 100.0
-if nnm_y1_val == 0.0 and best_sum == 0.0:
-    flags.append("Prospects & NNM Y1 both zero")
-elif abs(best_sum - nnm_y1_val) <= tol * max(nnm_y1_val, 1e-9):
-    score += 1; reasons_pos.append(
-        f"Prospects Best NNM {best_sum:.1f}M ≈ NNM Y1 {nnm_y1_val:.1f}M"
-    )
-else:
-    reasons_neg.append(
-        f"Prospects {best_sum:.1f}M vs NNM Y1 {nnm_y1_val:.1f}M (> {int(tolerance_pct)}% dev)"
-    )
-
-if score >= 7:
-    verdict = "🟢 Strong Candidate"
-elif score >= 4:
-    verdict = "🟡 Medium Potential"
-else:
-    verdict = "🔴 Weak Candidate"
-
-st.session_state["_score"] = score
-st.session_state["_verdict"] = verdict
+# (keep all computations exactly as you have them BEFORE this point:
+# total_nnm_3y, avg_roa, aum_min, score, reasons_pos, reasons_neg, flags, verdict,
+# st.session_state["_score"], st.session_state["_verdict"], etc.)
 
 if recruiter_mode:
     st.subheader(f"Traffic Light: {verdict} (score {score}/10)")
@@ -979,7 +898,11 @@ if recruiter_mode:
     with m4:
         st.metric("Clients", f"{int(current_number_clients)}")
 else:
-    st.caption("Recruiter analysis is hidden. Use the PIN to view.")
+    # Hide Section 5 content completely; show only a small login prompt.
+    st.info("Recruiter analysis is hidden. Use the PIN to view.")
+    with st.expander("🔒 Recruiter login", expanded=False):
+        _recruiter_login_ui()
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------- SECTION 6 ----------
