@@ -99,13 +99,35 @@ def _make_signature(candidate_dict: dict) -> str:
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+# ---------- secrets diagnostics ----------
+def _secrets_presence():
+    """Return a tuple (has_gcp_dict, has_google_json, client_email_or_empty)."""
+    has_gcp, has_json, email = False, False, ""
+    try:
+        if "gcp_service_account" in st.secrets:
+            has_gcp = True
+            val = st.secrets["gcp_service_account"]
+            d = val if isinstance(val, dict) else json.loads(str(val))
+            email = d.get("client_email", "") or email
+        if "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
+            has_json = True
+            try:
+                d2 = json.loads(str(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]))
+                email = d2.get("client_email", "") or email
+            except Exception:
+                # If it's not valid JSON, we'll catch it during connect
+                pass
+    except Exception:
+        pass
+    return has_gcp, has_json, email
+
 # ================== SHEETS (SECRETS FIRST, THEN LOCAL FILE) ==================
 def connect_sheet():
     """
     Returns: (worksheet or None, human_message)
     Priority for credentials:
       1) Streamlit Secrets: 
-         - TOML section [gcp_service_account] (dict)
+         - TOML section [gcp_service_account] (dict or JSON-stringified dict)
          - OR key GOOGLE_SERVICE_ACCOUNT_JSON (full JSON string)
       2) Local ./service_account.json (for local dev)
     """
@@ -121,13 +143,13 @@ def connect_sheet():
                 creds_dict = val if isinstance(val, dict) else json.loads(str(val))
             elif "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
                 creds_dict = json.loads(str(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]))
-        except Exception:
+        except Exception as e:
             creds_dict = None
 
         if creds_dict:
             try:
                 SA_EMAIL = creds_dict.get("client_email", "")
-                SA_SOURCE = "streamlit-secrets:gcp_service_account"
+                SA_SOURCE = "streamlit-secrets"
                 gc = gspread.service_account_from_dict(creds_dict)
             except Exception as e:
                 return None, f"⚠️ Could not use Streamlit Secrets for Google auth: {e}"
@@ -136,8 +158,15 @@ def connect_sheet():
         if gc is None:
             sa_path = _service_account_path()
             if not sa_path.exists():
+                has_gcp, has_json, email = _secrets_presence()
+                hint_bits = []
+                if not (has_gcp or has_json):
+                    hint_bits.append("No [gcp_service_account] or GOOGLE_SERVICE_ACCOUNT_JSON found in Secrets.")
+                else:
+                    hint_bits.append("Secrets are present but could not be parsed/used.")
                 return None, (
                     "⚠️ No Google credentials found. "
+                    + " ".join(hint_bits) + " "
                     "Add your service account JSON to **Streamlit Secrets** (preferred on cloud), "
                     "or place service_account.json next to this script for local dev."
                 )
@@ -447,7 +476,14 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
         "GAC_JSON: "
         f"{'set' if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON') else 'unset'}"
     )
-   
+    has_gcp, has_json, email_guess = _secrets_presence()
+    st.caption(
+        "Secrets: "
+        + ("[gcp_service_account] ✓ " if has_gcp else "[gcp_service_account] ✗ ")
+        + ("GOOGLE_SERVICE_ACCOUNT_JSON ✓ " if has_json else "GOOGLE_SERVICE_ACCOUNT_JSON ✗ ")
+        + (f"| client_email: `{email_guess}`" if email_guess else "| client_email: (unknown)")
+    )
+    _recruiter_login_ui()
 
 recruiter_mode = _is_recruiter()
 if recruiter_mode:
@@ -467,6 +503,7 @@ with st.expander("🔎 Connection diagnostics", expanded=False):
         st.success("Worksheet is ready.")
     else:
         st.warning("Worksheet not available yet. You can still use the simulator; saving will be disabled.")
+
 with st.expander("🧹 Maintenance", expanded=False):
     cols_m = st.columns(2)
     with cols_m[0]:
@@ -640,7 +677,7 @@ def _reset_form():
     st.session_state.p_worst = 0.0
 
 c_add, c_update, c_cancel = st.columns([1,1,1])
-add_clicked = c_add.button("➕ Add", disabled=(st.session_state.edit_index != -1), type="primary")
+add_clicked = c_add.button("➕ Add", disabled=(st.session_state.edit_index != -1))
 update_clicked = c_update.button("💾 Update", disabled=(st.session_state.edit_index == -1))
 cancel_clicked = c_cancel.button("✖ Cancel Edit", disabled=(st.session_state.edit_index == -1))
 
@@ -741,7 +778,7 @@ frames = [df for df in (df_pros, total_row) if not df.empty]
 df_display = pd.concat(frames, ignore_index=True) if frames else total_row.copy()
 
 highlighter = _make_highlighter(len(df_display))
-st.dataframe(df_display.style.apply(highlighter, axis=1), use_container_width=True)
+st.dataframe(df_display.style.apply(highlighter, axis=1), width="stretch")
 st.markdown('</div>', unsafe_allow_html=True)
 
 best_sum = float(df_pros["Best NNM (M)"].sum()) if not df_pros.empty else 0.0
@@ -1031,10 +1068,10 @@ with left:
         file_name=f"BP_{candidate_name or 'candidate'}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
         mime="application/pdf",
         data=pdf_buf.getvalue(),
-        use_container_width=True
+        width="stretch"
     )
 with right:
-    manual_clicked = st.button("💾 Save to Google Sheet (manual)", use_container_width=True)
+    manual_clicked = st.button("💾 Save to Google Sheet (manual)", width="stretch")
 
 # Validation + actions
 ok_to_save, missing_msg = _inputs_ok_for_save()
