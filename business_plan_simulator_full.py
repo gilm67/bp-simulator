@@ -13,6 +13,10 @@ import os as _os
 _os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS_JSON", None)
 _os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
+# --- Disable filesystem watching on Streamlit Cloud to avoid inotify limits ---
+_os.environ["STREAMLIT_SERVER_FILEWATCHER_TYPE"] = "none"
+_os.environ["WATCHDOG_DISABLE_FILE_SYSTEM_MONITORING"] = "true"
+
 # --- Standard imports ---
 import os
 import json
