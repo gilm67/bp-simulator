@@ -143,7 +143,7 @@ def connect_sheet():
                 creds_dict = val if isinstance(val, dict) else json.loads(str(val))
             elif "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
                 creds_dict = json.loads(str(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]))
-        except Exception as e:
+        except Exception:
             creds_dict = None
 
         if creds_dict:
@@ -222,12 +222,18 @@ def clean_trailing_columns(ws, first_bad_letter="X"):
 RECRUITER_PIN = os.getenv("BP_RECRUITER_PIN", "2468")
 
 def _is_recruiter() -> bool:
-    """Enable recruiter mode via URL or PIN login (uses st.query_params)."""
+    """
+    Recruiter mode is ON if:
+      - session_state['_recruiter_ok'] is True (set via PIN button), OR
+      - URL contains mode=recruiter or r=1 AND a correct pin=<PIN>.
+    We DO NOT auto-clear the session flag unless user clicks 'Exit'.
+    """
+    # If already enabled in this session, keep it
     if st.session_state.get("_recruiter_ok", False):
         return True
 
-    qp = st.query_params  # replaces deprecated experimental API
-
+    # Allow URL-based unlocking
+    qp = st.query_params
     def _first(key: str) -> str:
         v = qp.get(key)
         if v is None:
@@ -241,13 +247,7 @@ def _is_recruiter() -> bool:
     if ((mode == "recruiter") or (rflag == "1")) and pin == RECRUITER_PIN:
         st.session_state["_recruiter_ok"] = True
         return True
-    return False
 
-# ================== Recruiter visibility control ==================
-RECRUITER_PIN = os.getenv("BP_RECRUITER_PIN", "2468")
-
-def _is_recruiter() -> bool:
-    ...
     return False
 
 def _recruiter_login_ui():
@@ -258,6 +258,7 @@ def _recruiter_login_ui():
         if pin_try == RECRUITER_PIN:
             st.session_state["_recruiter_ok"] = True
             st.success("Recruiter mode enabled for this session.")
+            st.rerun()
         else:
             st.error("Wrong PIN.")
 
@@ -490,6 +491,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 # Show a small recruiter login box on the page
 with st.expander("🔒 Recruiter login", expanded=False):
     _recruiter_login_ui()
@@ -510,17 +512,9 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
         + ("GOOGLE_SERVICE_ACCOUNT_JSON ✓ " if has_json else "GOOGLE_SERVICE_ACCOUNT_JSON ✗ ")
         + (f"| client_email: `{email_guess}`" if email_guess else "| client_email: (unknown)")
     )
-    
 
-# --- Determine recruiter mode from URL or prior login ---
-# First: if the URL has no recruiter params, clear any stale recruiter flag
-_no_recruiter_params = all(k not in st.query_params for k in ("mode", "r", "pin"))
-if _no_recruiter_params and st.session_state.get("_recruiter_ok"):
-    st.session_state.pop("_recruiter_ok", None)
-
-# Now compute the mode (after clearing)
+# --- Determine recruiter mode (no auto-clearing; only explicit 'Exit' clears) ---
 recruiter_mode = _is_recruiter()
-
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
     st.button("🚪 Exit recruiter mode", on_click=_exit_recruiter_mode)
@@ -881,7 +875,7 @@ with st.sidebar:
     st.divider()
     st.caption("Powered by Executive Partners · Secure submission")
 
-  # ------ AI analysis (compute always; render only if recruiter_mode) ------
+# ------ AI analysis (compute always; render only if recruiter_mode) ------
 total_nnm_3y = float((nnm_y1 or 0.0) + (nnm_y2 or 0.0) + (nnm_y3 or 0.0))
 avg_roa = float(((roa_y1 or 0.0) + (roa_y2 or 0.0) + (roa_y3 or 0.0)) / 3.0)
 
@@ -889,7 +883,6 @@ avg_roa = float(((roa_y1 or 0.0) + (roa_y2 or 0.0) + (roa_y3 or 0.0)) / 3.0)
 if current_market == "CH Onshore":
     aum_min = 200.0
 else:
-    # default to HNWI thresholds unless recruiter overrides in the gated UI
     aum_min = 200.0
 
 score = 0
@@ -967,7 +960,7 @@ else:
 
 # Keep quick access in session for the sidebar
 st.session_state["_score"] = score
-st.session_state["_verdict"] = verdict  
+st.session_state["_verdict"] = verdict
 
 # ---------- SECTION 5 (Recruiter-only UI; render only when recruiter_mode) ----------
 if recruiter_mode:
@@ -981,7 +974,7 @@ if recruiter_mode:
     with seg_col2:
         tolerance_pct = st.slider("NNM vs Prospects tolerance (%)", 0, 50, 10, 1)
 
-    # Recompute aum_min and tolerance impact for transparency (optional to re-score live)
+    # Recompute aum_min and show for transparency (doesn't re-score live to keep code simple)
     aum_min = 200.0 if target_segment == "HNWI" else 300.0
 
     st.subheader(f"Traffic Light: {verdict} (score {score}/10)")
