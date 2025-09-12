@@ -2,8 +2,8 @@ name: Keep Streamlit Awake
 
 on:
   schedule:
-    # Runs every 6 hours (UTC)
-    - cron: "0 */6 * * *"
+    # Runs every 6 hours (UTC). For every 30 minutes, use: "*/30 * * * *"
+   - cron: "*/30 * * * *"
   workflow_dispatch: {}   # allow manual run
 
 jobs:
@@ -11,12 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Ping app (HEAD)
+      - name: Ping homepage (follow redirects)
         run: |
           set -eux
-          curl -I --max-time 20 https://ep-bp-simulator.streamlit.app || true
+          curl -sSL --max-time 20 https://ep-bp-simulator.streamlit.app/ || true
 
-      - name: Ping health
+      # Simple retry to cover brief cold starts
+      - name: Retry once
         run: |
           set -eux
-          curl -sSf --max-time 20 https://ep-bp-simulator.streamlit.app/_stcore/health || true
+          curl -sSL --max-time 20 https://ep-bp-simulator.streamlit.app/ || true
