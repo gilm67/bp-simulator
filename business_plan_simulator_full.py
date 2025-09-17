@@ -38,6 +38,9 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+# ================== BUILD TAG (visible) ==================
+APP_VERSION = "BP Simulator – 2025-09-17 12:45 CET"
+
 # ================== CONFIG ==================
 # Keep these in Python (NOT in Secrets)
 SHEET_ID = "1A__yEhD_0LYQwBF45wTSbWqdkRe0HAdnnBSj70qgpic"
@@ -62,7 +65,7 @@ AUTO_SAVE_MODE = os.getenv("BP_AUTO_SAVE_MODE", "on_pdf").lower()
 SA_EMAIL = None
 SA_SOURCE = ""  # set when local file or secrets are used
 
-# ---------- helpers ----------
+# ================== UTILS ==================
 def _service_account_path() -> Path:
     here = Path(__file__).parent
     return here / "service_account.json"
@@ -119,97 +122,109 @@ def _secrets_presence():
                 d2 = json.loads(str(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]))
                 email = d2.get("client_email", "") or email
             except Exception:
-                # If it's not valid JSON, we'll catch it during connect
                 pass
     except Exception:
         pass
     return has_gcp, has_json, email
 
-# ================== SHEETS (SECRETS FIRST, THEN LOCAL FILE) ==================
-def connect_sheet():
-    """
-    Returns: (worksheet or None, human_message)
-    Priority for credentials:
-      1) Streamlit Secrets: 
-         - TOML section [gcp_service_account] (dict or JSON-stringified dict)
-         - OR key GOOGLE_SERVICE_ACCOUNT_JSON (full JSON string)
-      2) Local ./service_account.json (for local dev)
-    """
-    global SA_EMAIL, SA_SOURCE
+# ---------- query params compatibility (Streamlit APIs differ) ----------
+def _get_query_params() -> dict:
     try:
-        gc = None
+        return dict(st.query_params)  # new API (>=1.31)
+    except Exception:
+        try:
+            return dict(st.experimental_get_query_params())  # legacy
+        except Exception:
+            return {}
+
+def _set_query_params(**kwargs):
+    try:
+        st.query_params.clear()
+        for k, v in kwargs.items():
+            st.query_params[k] = v
+    except Exception:
+        try:
+            st.experimental_set_query_params(**kwargs)  # legacy
+        except Exception:
+            pass
+
+# ================== SHEETS (SECRETS FIRST, THEN LOCAL FILE) ==================
+@st.cache_resource(show_spinner=False)
+def _connect_sheet_cached():
+    """Cached connector to avoid repeated auth during session."""
+    global SA_EMAIL, SA_SOURCE
+    gc = None
+    creds_dict = None
+
+    # --- 1) Try Streamlit Cloud Secrets ---
+    try:
+        if "gcp_service_account" in st.secrets:
+            val = st.secrets["gcp_service_account"]
+            creds_dict = val if isinstance(val, dict) else json.loads(str(val))
+        elif "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
+            creds_dict = json.loads(str(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]))
+    except Exception:
         creds_dict = None
 
-        # --- 1) Try Streamlit Cloud Secrets (preferred on Streamlit Community Cloud) ---
-        try:
-            if "gcp_service_account" in st.secrets:
-                val = st.secrets["gcp_service_account"]
-                creds_dict = val if isinstance(val, dict) else json.loads(str(val))
-            elif "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
-                creds_dict = json.loads(str(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]))
-        except Exception:
-            creds_dict = None
+    if creds_dict:
+        SA_EMAIL = creds_dict.get("client_email", "")
+        SA_SOURCE = "streamlit-secrets"
+        gc = gspread.service_account_from_dict(creds_dict)
 
-        if creds_dict:
-            try:
-                SA_EMAIL = creds_dict.get("client_email", "")
-                SA_SOURCE = "streamlit-secrets"
-                gc = gspread.service_account_from_dict(creds_dict)
-            except Exception as e:
-                return None, f"⚠️ Could not use Streamlit Secrets for Google auth: {e}"
+    # --- 2) Fallback to local file ---
+    if gc is None:
+        sa_path = _service_account_path()
+        if not sa_path.exists():
+            has_gcp, has_json, email = _secrets_presence()
+            hint_bits = []
+            if not (has_gcp or has_json):
+                hint_bits.append("No [gcp_service_account] or GOOGLE_SERVICE_ACCOUNT_JSON found in Secrets.")
+            else:
+                hint_bits.append("Secrets are present but could not be parsed/used.")
+            msg = (
+                "⚠️ No Google credentials found. "
+                + " ".join(hint_bits) + " "
+                "Add your service account JSON to **Streamlit Secrets** (preferred on cloud), "
+                "or place service_account.json next to this script for local dev."
+            )
+            return None, "", "", msg
+        SA_SOURCE = f"local-file:{sa_path}"
+        SA_EMAIL = _read_sa_email_from_file(sa_path)
+        gc = gspread.service_account(filename=str(sa_path))
 
-        # --- 2) Fallback to local file (useful for local development) ---
-        if gc is None:
-            sa_path = _service_account_path()
-            if not sa_path.exists():
-                has_gcp, has_json, email = _secrets_presence()
-                hint_bits = []
-                if not (has_gcp or has_json):
-                    hint_bits.append("No [gcp_service_account] or GOOGLE_SERVICE_ACCOUNT_JSON found in Secrets.")
-                else:
-                    hint_bits.append("Secrets are present but could not be parsed/used.")
-                return None, (
-                    "⚠️ No Google credentials found. "
-                    + " ".join(hint_bits) + " "
-                    "Add your service account JSON to **Streamlit Secrets** (preferred on cloud), "
-                    "or place service_account.json next to this script for local dev."
-                )
-            SA_SOURCE = f"local-file:{sa_path}"
-            SA_EMAIL = _read_sa_email_from_file(sa_path)
-            gc = gspread.service_account(filename=str(sa_path))
-
-        # --- Open target spreadsheet ---
-        try:
-            sh = gc.open_by_key(SHEET_ID)
-        except gspread.exceptions.APIError as e:
-            msg = str(e)
-            if "PERMISSION_DENIED" in msg or "403" in msg:
-                hint = (
-                    f"Permission denied. Share the Google Sheet with "
-                    f"{SA_EMAIL or '[your service account email]'} as an **Editor**."
-                )
-                return None, f"⚠️ Could not connect to Google Sheet: {hint}"
-            if "NOT_FOUND" in msg or "404" in msg:
-                return None, "⚠️ Could not connect: Sheet not found. Check SHEET_ID."
-            return None, f"⚠️ Google API error while opening sheet: {e}"
-
-        # --- Get/create worksheet & ensure header row ---
-        try:
-            ws = sh.worksheet(WORKSHEET_NAME)
-        except gspread.exceptions.WorksheetNotFound:
-            ws = sh.add_worksheet(title=WORKSHEET_NAME, rows=2000, cols=50)
-
-        headers = ws.row_values(1)
-        if headers != HEADER_ORDER:
-            ws.update("A1", [HEADER_ORDER])
-
-        src_label = "✅ Connected to Google Sheet"
-        if SA_SOURCE:
-            src_label += f" (auth: {SA_SOURCE})"
-        return ws, src_label
-
+    # --- Open target spreadsheet ---
+    try:
+        sh = gc.open_by_key(SHEET_ID)
     except gspread.exceptions.APIError as e:
-        return None, f"⚠️ Google API error: {e}"
+        msg = str(e)
+        if "PERMISSION_DENIED" in msg or "403" in msg:
+            hint = (
+                f"Permission denied. Share the Google Sheet with "
+                f"{SA_EMAIL or '[your service account email]'} as an **Editor**."
+            )
+            return None, SA_EMAIL, SA_SOURCE, f"⚠️ Could not connect to Google Sheet: {hint}"
+        if "NOT_FOUND" in msg or "404" in msg:
+            return None, SA_EMAIL, SA_SOURCE, "⚠️ Could not connect: Sheet not found. Check SHEET_ID."
+        return None, SA_EMAIL, SA_SOURCE, f"⚠️ Google API error while opening sheet: {e}"
+
+    # --- Get/create worksheet & ensure header row ---
+    try:
+        ws = sh.worksheet(WORKSHEET_NAME)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=WORKSHEET_NAME, rows=2000, cols=50)
+
+    headers = ws.row_values(1)
+    if headers != HEADER_ORDER:
+        ws.update("A1", [HEADER_ORDER])
+
+    return ws, SA_EMAIL, SA_SOURCE, "✅ Connected to Google Sheet"
+
+def connect_sheet():
+    try:
+        ws, email, source, msg = _connect_sheet_cached()
+        global SA_EMAIL, SA_SOURCE
+        SA_EMAIL, SA_SOURCE = email, source
+        return ws, msg
     except Exception as e:
         return None, f"⚠️ Could not connect to Google Sheet: {e}"
 
@@ -232,21 +247,13 @@ def _is_recruiter() -> bool:
       - URL contains mode=recruiter or r=1 AND a correct pin=<PIN>.
     We DO NOT auto-clear the session flag unless user clicks 'Exit'.
     """
-    # If already enabled in this session, keep it
     if st.session_state.get("_recruiter_ok", False):
         return True
 
-    # Allow URL-based unlocking
-    qp = st.query_params
-    def _first(key: str) -> str:
-        v = qp.get(key)
-        if v is None:
-            return ""
-        return v[0] if isinstance(v, (list, tuple)) else v
-
-    mode = (_first("mode") or "").lower()
-    rflag = _first("r")
-    pin = _first("pin")
+    qp = _get_query_params()
+    mode = (qp.get("mode", [""])[0] if isinstance(qp.get("mode"), list) else qp.get("mode", "")).lower()
+    rflag = qp.get("r", [""])[0] if isinstance(qp.get("r"), list) else qp.get("r", "")
+    pin = qp.get("pin", [""])[0] if isinstance(qp.get("pin"), list) else qp.get("pin", "")
 
     if ((mode == "recruiter") or (rflag == "1")) and pin == RECRUITER_PIN:
         st.session_state["_recruiter_ok"] = True
@@ -267,16 +274,8 @@ def _recruiter_login_ui():
             st.error("Wrong PIN.")
 
 def _exit_recruiter_mode():
-    # Clear session flag
     st.session_state.pop("_recruiter_ok", None)
-    # Clear any recruiter params from URL (new API first, fall back to legacy)
-    try:
-        st.query_params.clear()
-    except Exception:
-        try:
-            st.experimental_set_query_params()  # legacy way to clear
-        except Exception:
-            pass
+    _set_query_params()  # clear all
     st.rerun()
 
 # ================== PDF GENERATION ==================
@@ -413,7 +412,8 @@ def build_pdf(candidate, prospects_df, revenue_df) -> BytesIO:
 # ================== APP ==================
 st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
 
-# === Build/version tag ===
+# === Version/build tags (visible) ===
+st.caption(APP_VERSION)
 build_time = datetime.now().strftime("%Y-%m-%d %Hh%M")
 st.caption(f"🔄 Build: {build_time}")
 
@@ -517,7 +517,7 @@ with st.expander("⚙️ Diagnostics (staff)", expanded=False):
         + (f"| client_email: `{email_guess}`" if email_guess else "| client_email: (unknown)")
     )
 
-# --- Determine recruiter mode (no auto-clearing; only explicit 'Exit' clears) ---
+# --- Determine recruiter mode ---
 recruiter_mode = _is_recruiter()
 if recruiter_mode:
     st.caption("🛡️ Recruiter mode is ON (Section 5 is visible).")
@@ -569,7 +569,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.caption("Contact & Role")
     candidate_name = st.text_input("Candidate Name", placeholder="e.g., Jane Smith")
-    candidate_email = st.text_input("Candidate Email *", placeholder="name@company.com")
+    candidate_email = st.text_input("Candidate Email *", placeholder="name@company.com").strip()
     years_experience = st.number_input("Years of Experience *", min_value=0, step=1, help="Total years in wealth/market")
     inherited_book = st.slider("Inherited Book (% of total AUM) *", 0, 100, 0, 1, help="Share of AUM expected to be inherited")
     current_role = st.selectbox(
