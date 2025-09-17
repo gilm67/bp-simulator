@@ -29,6 +29,9 @@ import gspread
 import pandas as pd
 import streamlit as st
 
+APP_VERSION = "BP Simulator – 2025-09-17 12:45 CET"
+st.caption(APP_VERSION)
+
 # --- PDF/reportlab imports ---
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
