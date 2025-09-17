@@ -29,8 +29,12 @@ import gspread
 import pandas as pd
 import streamlit as st
 
+# ================== BUILD TAG (visible) ==================
 APP_VERSION = "BP Simulator – 2025-09-17 12:45 CET"
-st.caption(APP_VERSION)
+
+# >>> Streamlit config MUST be the first Streamlit call <<<
+st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
+st.caption(APP_VERSION)  # safe to show after set_page_config
 
 # --- PDF/reportlab imports ---
 from reportlab.lib.pagesizes import A4
@@ -40,9 +44,6 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
-# ================== BUILD TAG (visible) ==================
-APP_VERSION = "BP Simulator – 2025-09-17 12:45 CET"
 
 # ================== CONFIG ==================
 # Keep these in Python (NOT in Secrets)
@@ -412,11 +413,7 @@ def build_pdf(candidate, prospects_df, revenue_df) -> BytesIO:
     buffer.seek(0)
     return buffer
 
-# ================== APP ==================
-st.set_page_config(page_title="Business Plan Simulator", page_icon="📈", layout="wide")
-
-# === Version/build tags (visible) ===
-st.caption(APP_VERSION)
+# === Version/build tag (extra) ===
 build_time = datetime.now().strftime("%Y-%m-%d %Hh%M")
 st.caption(f"🔄 Build: {build_time}")
 
